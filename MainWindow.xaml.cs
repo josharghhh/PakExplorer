@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Text;
@@ -55,30 +56,92 @@ namespace PakExplorer {
             dlg.Filter = "PAK File|*.pak|Preview BI Files|*.pak";
             dlg.Multiselect = true;
             if (dlg.ShowDialog() == true) {
-                LoadPAK(dlg.FileName);
+                foreach (var fileName in dlg.FileNames) {
+                    LoadPAK(fileName);
+                }
             }
         }
         
-        private void ExtractAll(object sender, RoutedEventArgs e) {
+        private async void ExtractAll(object sender, RoutedEventArgs e) {
             var dialog = new FolderBrowserDialog();
             dialog.Description = "Extract To...";
             dialog.UseDescriptionForTitle = true;
-            dialog.ShowDialog();
-            ExtractAllToFolder(dialog.SelectedPath);
+            if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath)) {
+                return;
+            }
+            await ExtractAllToFolderAsync(dialog.SelectedPath);
         }
 
-        private void ExtractAllToFolder(string dialogSelectedPath) {
+        private async Task ExtractAllToFolderAsync(string dialogSelectedPath) {
             foreach (PakTreeItem pak in PakList) {
                 var currentExtractPath = Path.Combine(dialogSelectedPath,
                     Path.GetFileNameWithoutExtension(pak.PakFile.FileName));
                 foreach (var entry in pak.PakFile.PakEntries) {
                     var extractPath = Path.Combine(currentExtractPath, entry.Name);
-                    if (!Directory.Exists(Directory.GetParent(extractPath)?.FullName)) {
-                        Directory.CreateDirectory(Directory.GetParent(extractPath).FullName);
-                    }
-                    File.WriteAllBytesAsync(extractPath, entry.EntryData);
+                    await WriteEntryToPathAsync(extractPath, entry.EntryData);
                 }
             }
+        }
+
+        private async void ExtractSelected(object sender, RoutedEventArgs e) {
+            if (SelectedEntry is null) {
+                MessageBox.Show("Select a file in the pak tree before saving.", "No file selected",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var saveDialog = new Microsoft.Win32.SaveFileDialog {
+                Title = "Save Selected File",
+                FileName = Path.GetFileName(SelectedEntry.Name),
+                Filter = "All Files|*.*"
+            };
+
+            if (saveDialog.ShowDialog() == true) {
+                await WriteEntryToPathAsync(saveDialog.FileName, SelectedEntry.EntryData);
+            }
+        }
+
+        private async void ExtractAllAsZip(object sender, RoutedEventArgs e) {
+            var saveDialog = new Microsoft.Win32.SaveFileDialog {
+                Title = "Extract Opened Paks as Zip",
+                Filter = "Zip Archive|*.zip",
+                DefaultExt = ".zip",
+                FileName = "paks.zip"
+            };
+
+            if (saveDialog.ShowDialog() == true) {
+                await ExtractAllToZipAsync(saveDialog.FileName);
+            }
+        }
+
+        private async Task ExtractAllToZipAsync(string zipPath) {
+            var parentDirectory = Directory.GetParent(zipPath)?.FullName;
+            if (!string.IsNullOrWhiteSpace(parentDirectory) && !Directory.Exists(parentDirectory)) {
+                Directory.CreateDirectory(parentDirectory);
+            }
+
+            await Task.Run(() => {
+                using var zipStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                using var archive = new ZipArchive(zipStream, ZipArchiveMode.Create);
+                foreach (PakTreeItem pak in PakList) {
+                    var pakRoot = Path.GetFileNameWithoutExtension(pak.PakFile.FileName);
+                    foreach (var entry in pak.PakFile.PakEntries) {
+                        var entryPath = Path.Combine(pakRoot, entry.Name);
+                        var zipEntry = archive.CreateEntry(entryPath, CompressionLevel.Optimal);
+                        using var entryStream = zipEntry.Open();
+                        entryStream.Write(entry.EntryData, 0, entry.EntryData.Length);
+                    }
+                }
+            });
+        }
+
+        private static async Task WriteEntryToPathAsync(string extractPath, byte[] entryData) {
+            var parentDirectory = Directory.GetParent(extractPath)?.FullName;
+            if (!string.IsNullOrWhiteSpace(parentDirectory) && !Directory.Exists(parentDirectory)) {
+                Directory.CreateDirectory(parentDirectory);
+            }
+
+            await File.WriteAllBytesAsync(extractPath, entryData);
         }
 
         public void LoadPAK(string path) {
