@@ -24,6 +24,8 @@
             </MenuItem>
             <MenuItem Header="_Extract" Name="ExtractMenuItem">
                 <MenuItem Header="_Extract Opened Paks" Click="ExtractAll"  InputGestureText="Ctrl+X"  />
+                <MenuItem Header="_Save Selected File..." Click="ExtractSelected" InputGestureText="Ctrl+S" />
+                <MenuItem Header="_Extract Opened Paks as Zip..." Click="ExtractAllAsZip" />
 
             </MenuItem>
             <MenuItem Header="_Options">
